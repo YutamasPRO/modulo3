@@ -1,0 +1,32 @@
+services:
+  catalog-service:
+    build: ./catalog-service
+    container_name: catalog-service
+    ports:
+      - "8001:8001"
+    networks:
+      - coworking-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  orders-service:
+    build: ./orders-service
+    container_name: orders-service
+    ports:
+      - "8002:8002"
+    environment:
+      - CATALOG_URL=http://catalog-service:8001
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+    networks:
+      - coworking-network
+
+networks:
+  coworking-network:
+    # Nombre explícito para que coincida con: docker network inspect coworking_coworking-network
+    name: coworking_coworking-network
+    driver: bridge

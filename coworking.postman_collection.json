@@ -1,0 +1,34 @@
+{
+  "info": {
+    "name": "Coworking Workshop",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "catalog_url", "value": "http://localhost:8001" },
+    { "key": "orders_url", "value": "http://localhost:8002" }
+  ],
+  "item": [
+    { "name": "Catalog - Health", "request": { "method": "GET", "url": "{{catalog_url}}/health" } },
+    { "name": "Catalog - List spaces", "request": { "method": "GET", "url": "{{catalog_url}}/spaces" } },
+    { "name": "Catalog - Get space 1", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/1" } },
+    { "name": "Catalog - Get space 999 (404)", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/999" } },
+    { "name": "Orders - Health", "request": { "method": "GET", "url": "{{orders_url}}/health" } },
+    {
+      "name": "Orders - Create order",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{orders_url}}/orders?space_id=1&user_email=test@example.com&hours=2",
+          "host": ["{{orders_url}}"],
+          "path": ["orders"],
+          "query": [
+            { "key": "space_id", "value": "1" },
+            { "key": "user_email", "value": "test@example.com" },
+            { "key": "hours", "value": "2" }
+          ]
+        }
+      }
+    },
+    { "name": "Orders - List orders", "request": { "method": "GET", "url": "{{orders_url}}/orders" } }
+  ]
+}
