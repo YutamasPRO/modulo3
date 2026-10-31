@@ -8,3 +8,4 @@
 *.py[cod]
 .pytest_cache/
 doc_images/
+.vscode/
