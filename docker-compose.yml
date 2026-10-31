@@ -17,6 +17,8 @@ services:
     container_name: orders-service
     ports:
       - "8002:8002"
+    env_file:
+      - ./orders-service/.env
     environment:
       - CATALOG_URL=http://catalog-service:8001
     depends_on:

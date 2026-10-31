@@ -4,6 +4,8 @@ import json
 import os
 import threading
 import time
+from database import SessionLocal
+from models import OrderDB
 from datetime import datetime, timezone
 from typing import Dict, List
 
@@ -32,7 +34,7 @@ class Order(BaseModel):
     created_at: str
 
 
-ORDERS: List[Order] = []
+
 
 # --- Consumidor de eventos (equivalente a SQS + Lambda consumer) ---
 REDIS_URL = os.getenv("REDIS_URL")
@@ -93,11 +95,12 @@ def create_order(
     user_email: str,
     hours: int = Query(..., gt=0, description="Horas a reservar"),
 ):
-    # 1. Consultar al catalog-service (dependencia HTTP síncrona)
     try:
-        response = httpx.get(f"{CATALOG_URL}/spaces/{space_id}", timeout=CATALOG_TIMEOUT)
+        response = httpx.get(
+            f"{CATALOG_URL}/spaces/{space_id}",
+            timeout=CATALOG_TIMEOUT
+        )
     except httpx.RequestError:
-        # Catálogo caído, sin red o con timeout
         raise HTTPException(status_code=503, detail="Catalog service unavailable")
 
     if response.status_code == 404:
@@ -110,33 +113,65 @@ def create_order(
     if not space.get("available", True):
         raise HTTPException(status_code=409, detail="Space is not available")
 
-    # 2. Calcular precio. Aquí vive el ACOPLAMIENTO al contrato del catálogo:
-    #    si "price_per_hour" cambia de nombre, esta línea lanza KeyError (LAB 5).
     price_per_hour = space["price_per_hour"]
 
-    order = Order(
-        id=len(ORDERS) + 1,
-        space_id=space_id,
-        space_name=space["name"],
-        user_email=user_email,
-        hours=hours,
-        price_per_hour=price_per_hour,
-        total_price=price_per_hour * hours,
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-    ORDERS.append(order)
-    return order
+    db = SessionLocal()
+
+    try:
+        new_order = OrderDB(
+            space_id=space_id,
+            space_name=space["name"],
+            user_email=user_email,
+            hours=hours,
+            price_per_hour=price_per_hour,
+            total_price=price_per_hour * hours
+        )
+
+        db.add(new_order)
+        db.commit()
+        db.refresh(new_order)
+
+        return Order(
+            id=new_order.id,
+            space_id=new_order.space_id,
+            space_name=new_order.space_name,
+            user_email=new_order.user_email,
+            hours=new_order.hours,
+            price_per_hour=new_order.price_per_hour,
+            total_price=new_order.total_price,
+            created_at=new_order.created_at.isoformat()
+        )
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error creating order")
+
+    finally:
+        db.close()
 
 
 @app.get("/orders", response_model=List[Order])
 def list_orders():
-    return ORDERS
-
-
-@app.get("/events/log")
-def events_log():
-    return {"availability": SPACE_AVAILABILITY, "events": EVENT_LOG}
-
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    db = SessionLocal()
+    try:
+        orders = db.query(OrderDB).order_by(OrderDB.id).all()
+        return [
+            Order(
+                id=order.id,
+                space_id=order.space_id,
+                space_name=order.space_name,
+                user_email=order.user_email,
+                hours=order.hours,
+                price_per_hour=order.price_per_hour,
+                total_price=order.total_price,
+                created_at=order.created_at.isoformat()
+            )
+            for order in orders
+        ]
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving orders"
+        )
+    finally:
+        db.close()
