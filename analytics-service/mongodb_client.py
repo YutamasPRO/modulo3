@@ -276,3 +276,4 @@ class MongoDBClient:
 
 # Instancia compartida
 mongo_client = MongoDBClient()
+
