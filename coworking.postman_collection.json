@@ -1,34 +1,69 @@
 {
   "info": {
-    "name": "Coworking Workshop",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "name": "Coworking Workshop - Taller 3: Bases de Datos en la Nube",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Colección completa para pruebas de Taller 3: Catalog Service, Orders Service (PostgreSQL + Alembic) y Analytics Service (MongoDB Atlas)."
   },
   "variable": [
     { "key": "catalog_url", "value": "http://localhost:8001" },
-    { "key": "orders_url", "value": "http://localhost:8002" }
+    { "key": "orders_url", "value": "http://localhost:8002" },
+    { "key": "analytics_url", "value": "http://localhost:8003" }
   ],
   "item": [
-    { "name": "Catalog - Health", "request": { "method": "GET", "url": "{{catalog_url}}/health" } },
-    { "name": "Catalog - List spaces", "request": { "method": "GET", "url": "{{catalog_url}}/spaces" } },
-    { "name": "Catalog - Get space 1", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/1" } },
-    { "name": "Catalog - Get space 999 (404)", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/999" } },
-    { "name": "Orders - Health", "request": { "method": "GET", "url": "{{orders_url}}/health" } },
     {
-      "name": "Orders - Create order",
-      "request": {
-        "method": "POST",
-        "url": {
-          "raw": "{{orders_url}}/orders?space_id=1&user_email=test@example.com&hours=2",
-          "host": ["{{orders_url}}"],
-          "path": ["orders"],
-          "query": [
-            { "key": "space_id", "value": "1" },
-            { "key": "user_email", "value": "test@example.com" },
-            { "key": "hours", "value": "2" }
-          ]
-        }
-      }
+      "name": "Catalog Service",
+      "item": [
+        { "name": "Catalog - Health", "request": { "method": "GET", "url": "{{catalog_url}}/health" } },
+        { "name": "Catalog - List spaces", "request": { "method": "GET", "url": "{{catalog_url}}/spaces" } },
+        { "name": "Catalog - Get space 1", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/1" } },
+        { "name": "Catalog - Get space 999 (404)", "request": { "method": "GET", "url": "{{catalog_url}}/spaces/999" } }
+      ]
     },
-    { "name": "Orders - List orders", "request": { "method": "GET", "url": "{{orders_url}}/orders" } }
+    {
+      "name": "Orders Service (LAB 8 - PostgreSQL + Alembic)",
+      "item": [
+        { "name": "Orders - Health", "request": { "method": "GET", "url": "{{orders_url}}/health" } },
+        {
+          "name": "Orders - Create order",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{orders_url}}/orders?space_id=1&user_email=test@example.com&hours=2",
+              "host": ["{{orders_url}}"],
+              "path": ["orders"],
+              "query": [
+                { "key": "space_id", "value": "1" },
+                { "key": "user_email", "value": "test@example.com" },
+                { "key": "hours", "value": "2" }
+              ]
+            }
+          }
+        },
+        { "name": "Orders - List orders", "request": { "method": "GET", "url": "{{orders_url}}/orders" } },
+        { "name": "Orders - Get order by ID", "request": { "method": "GET", "url": "{{orders_url}}/orders/1" } }
+      ]
+    },
+    {
+      "name": "Analytics Service (LAB 9 - MongoDB Atlas)",
+      "item": [
+        { "name": "Analytics - Health", "request": { "method": "GET", "url": "{{analytics_url}}/health" } },
+        { "name": "Analytics - Summary (KPIs)", "request": { "method": "GET", "url": "{{analytics_url}}/analytics/summary" } },
+        { "name": "Analytics - Popular Spaces", "request": { "method": "GET", "url": "{{analytics_url}}/analytics/popular-spaces" } },
+        { "name": "Analytics - User Analytics", "request": { "method": "GET", "url": "{{analytics_url}}/analytics/user/test@example.com" } },
+        {
+          "name": "Analytics - Log Custom Event",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_type\": \"SpaceSearch\",\n  \"data\": {\n    \"user_email\": \"test@example.com\",\n    \"space_id\": 1,\n    \"filters\": { \"min_capacity\": 4 }\n  }\n}"
+            },
+            "url": "{{analytics_url}}/events"
+          }
+        },
+        { "name": "Analytics - List Events", "request": { "method": "GET", "url": "{{analytics_url}}/analytics/events?limit=20" } }
+      ]
+    }
   ]
 }

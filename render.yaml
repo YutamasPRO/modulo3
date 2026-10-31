@@ -1,5 +1,5 @@
 services:
-  # Equivalente a EventBridge + SQS: stream "catalog-events" sobre Redis
+  # Stream de eventos Redis (Key Value en Render)
   - type: keyvalue
     name: catalog-events-redis
     plan: free
@@ -7,7 +7,7 @@ services:
     ipAllowList: []   # solo accesible desde la red privada de Render
     maxmemoryPolicy: noeviction
 
-  # Equivalente a API Gateway + Lambda catalog-fn (publica SpaceChanged)
+  # Microservicio Catálogo
   - type: web
     name: catalog-service
     runtime: docker
@@ -27,7 +27,7 @@ services:
           name: catalog-events-redis
           property: connectionString
 
-  # Equivalente a Lambda consumer-fn + orders-service (consume SpaceChanged)
+  # Microservicio Órdenes (PostgreSQL con SQLAlchemy + Alembic)
   - type: web
     name: orders-service
     runtime: docker
@@ -40,7 +40,35 @@ services:
       - key: PORT
         value: "8002"
       - key: CATALOG_URL
-        value: http://catalog-service:8001   # red privada de Render
+        value: http://catalog-service:8001   # Red privada de Render
+      - key: ANALYTICS_URL
+        value: http://analytics-service:8003 # Red privada de Render
+      - key: DATABASE_URL
+        sync: false                          # Configurada en Render con la URL de PostgreSQL
+      - key: EVENT_STREAM
+        value: catalog-events
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: catalog-events-redis
+          property: connectionString
+
+  # Microservicio Analytics (MongoDB Atlas para métricas y telemetría)
+  - type: web
+    name: analytics-service
+    runtime: docker
+    dockerfilePath: ./analytics-service/Dockerfile
+    dockerContext: ./analytics-service
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "8003"
+      - key: MONGO_URI
+        sync: false                          # Configurada en Render con la URL de MongoDB Atlas
+      - key: MONGO_DB_NAME
+        value: coworking_analytics
       - key: EVENT_STREAM
         value: catalog-events
       - key: REDIS_URL

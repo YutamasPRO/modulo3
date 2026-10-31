@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["sh", "-c", "python -m alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8002"]
+CMD ["sh", "-c", "python -m alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8002}"]

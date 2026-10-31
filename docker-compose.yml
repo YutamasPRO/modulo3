@@ -21,14 +21,43 @@ services:
       - ./orders-service/.env
     environment:
       - CATALOG_URL=http://catalog-service:8001
+      - ANALYTICS_URL=http://analytics-service:8003
     depends_on:
       catalog-service:
         condition: service_healthy
     networks:
       - coworking-network
 
+  analytics-service:
+    build: ./analytics-service
+    container_name: analytics-service
+    ports:
+      - "8003:8003"
+    env_file:
+      - ./analytics-service/.env
+    environment:
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/}
+      - MONGO_DB_NAME=coworking_analytics
+    depends_on:
+      - mongodb
+    networks:
+      - coworking-network
+
+  # MongoDB local para pruebas en desarrollo (en producción se usa MongoDB Atlas)
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - coworking-network
+
 networks:
   coworking-network:
-    # Nombre explícito para que coincida con: docker network inspect coworking_coworking-network
     name: coworking_coworking-network
     driver: bridge
+
+volumes:
+  mongo-data:

@@ -1,13 +1,12 @@
-"""orders-service: crea órdenes consultando al catalog-service via HTTP
-y consume eventos SpaceChanged desde un Redis Stream."""
+"""orders-service: crea órdenes consultando al catalog-service via HTTP,
+persiste en PostgreSQL con SQLAlchemy + Alembic,
+y envía eventos/métricas a analytics-service (MongoDB Atlas) y Redis Stream."""
 import json
 import os
 import threading
 import time
-from database import SessionLocal
-from models import OrderDB
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import httpx
 import redis
@@ -15,12 +14,19 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-app = FastAPI(title="Orders Service", version="1.1.0")
+from database import SessionLocal
+from models import OrderDB
+
+app = FastAPI(title="Orders Service", version="1.2.0")
 
 # En Docker Compose el hostname es el nombre del servicio.
 # En local se puede sobreescribir: CATALOG_URL=http://localhost:8001
 CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog-service:8001")
 CATALOG_TIMEOUT = float(os.getenv("CATALOG_TIMEOUT", "3.0"))
+
+# Analytics Service (MongoDB Atlas para métricas y telemetría)
+ANALYTICS_URL = os.getenv("ANALYTICS_URL", "http://analytics-service:8003")
+ANALYTICS_TIMEOUT = float(os.getenv("ANALYTICS_TIMEOUT", "2.0"))
 
 
 class Order(BaseModel):
@@ -32,8 +38,6 @@ class Order(BaseModel):
     price_per_hour: float
     total_price: float
     created_at: str
-
-
 
 
 # --- Consumidor de eventos (equivalente a SQS + Lambda consumer) ---
@@ -95,6 +99,7 @@ def create_order(
     user_email: str,
     hours: int = Query(..., gt=0, description="Horas a reservar"),
 ):
+    # 1. Consultar catalog-service para validar espacio y precio
     try:
         response = httpx.get(
             f"{CATALOG_URL}/spaces/{space_id}",
@@ -115,8 +120,8 @@ def create_order(
 
     price_per_hour = space["price_per_hour"]
 
+    # 2. Persistir en PostgreSQL vía SQLAlchemy
     db = SessionLocal()
-
     try:
         new_order = OrderDB(
             space_id=space_id,
@@ -131,7 +136,7 @@ def create_order(
         db.commit()
         db.refresh(new_order)
 
-        return Order(
+        order_data = Order(
             id=new_order.id,
             space_id=new_order.space_id,
             space_name=new_order.space_name,
@@ -142,10 +147,35 @@ def create_order(
             created_at=new_order.created_at.isoformat()
         )
 
-    except Exception:
-        db.rollback()
-        raise HTTPException(status_code=500, detail="Error creating order")
+        # 3. Notificar a analytics-service (arquitectura orders-service -> analytics-svc -> MongoDB Atlas)
+        if ANALYTICS_URL:
+            try:
+                httpx.post(
+                    f"{ANALYTICS_URL}/orders",
+                    json={
+                        "order_id": new_order.id,
+                        "space_id": new_order.space_id,
+                        "space_name": new_order.space_name,
+                        "user_email": new_order.user_email,
+                        "hours": new_order.hours,
+                        "price_per_hour": new_order.price_per_hour,
+                        "total_price": new_order.total_price,
+                        "created_at": new_order.created_at.isoformat()
+                    },
+                    timeout=ANALYTICS_TIMEOUT
+                )
+            except Exception as exc:
+                print(f"[warning] No se pudo enviar orden a analytics: {exc}")
 
+        return order_data
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        print(f"[error] Error guardando orden en PostgreSQL: {exc}")
+        raise HTTPException(status_code=500, detail="Error creating order")
     finally:
         db.close()
 
@@ -168,10 +198,39 @@ def list_orders():
             )
             for order in orders
         ]
-    except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Error retrieving orders"
-        )
+    except Exception as exc:
+        print(f"[error] Error consultando órdenes: {exc}")
+        raise HTTPException(status_code=500, detail="Error retrieving orders")
     finally:
         db.close()
+
+
+@app.get("/orders/{order_id}", response_model=Order)
+def get_order(order_id: int):
+    db = SessionLocal()
+    try:
+        order = db.query(OrderDB).filter(OrderDB.id == order_id).first()
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+        return Order(
+            id=order.id,
+            space_id=order.space_id,
+            space_name=order.space_name,
+            user_email=order.user_email,
+            hours=order.hours,
+            price_per_hour=order.price_per_hour,
+            total_price=order.total_price,
+            created_at=order.created_at.isoformat()
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[error] Error consultando orden {order_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Error retrieving order")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8002"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
