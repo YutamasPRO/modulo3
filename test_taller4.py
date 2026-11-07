@@ -167,3 +167,4 @@ print(f"       Respuesta: {resp_admin_ok.json()}")
 print("\n" + "=" * 65)
 print("¡TODAS LAS PRUEBAS DE TALLER 4 COMPLETADAS CON ÉXITO! (10/10)")
 print("=" * 65)
+

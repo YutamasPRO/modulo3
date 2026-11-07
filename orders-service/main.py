@@ -36,13 +36,18 @@ app = FastAPI(
     description="Microservicio de órdenes con autenticación JWT, RBAC y persistencia PostgreSQL."
 )
 
-# En Docker Compose el hostname es el nombre del servicio.
-# En local se puede sobreescribir: CATALOG_URL=http://localhost:8001
-CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog-service:8001")
+# Detección inteligente de entorno Docker vs Local
+def _is_in_docker() -> bool:
+    return os.path.exists("/.dockerenv") or os.getenv("DOCKER_CONTAINER") == "true"
+
+_def_cat_host = "catalog-service" if _is_in_docker() else "localhost"
+_def_ana_host = "analytics-service" if _is_in_docker() else "localhost"
+
+CATALOG_URL = os.getenv("CATALOG_URL", f"http://{_def_cat_host}:8001")
 CATALOG_TIMEOUT = float(os.getenv("CATALOG_TIMEOUT", "3.0"))
 
 # Analytics Service (MongoDB Atlas para métricas y telemetría)
-ANALYTICS_URL = os.getenv("ANALYTICS_URL", "http://analytics-service:8003")
+ANALYTICS_URL = os.getenv("ANALYTICS_URL", f"http://{_def_ana_host}:8003")
 ANALYTICS_TIMEOUT = float(os.getenv("ANALYTICS_TIMEOUT", "2.0"))
 
 
