@@ -1,5 +1,6 @@
 """orders-service: crea órdenes consultando al catalog-service via HTTP,
 persiste en PostgreSQL con SQLAlchemy + Alembic,
+gestiona autenticación JWT + RBAC (LAB 10),
 y envía eventos/métricas a analytics-service (MongoDB Atlas) y Redis Stream."""
 import json
 import os
@@ -11,13 +12,29 @@ from typing import Dict, List, Optional
 import httpx
 import redis
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, status
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from database import SessionLocal
-from models import OrderDB
+from database import SessionLocal, get_db
+from models import OrderDB, UserDB
+from auth import (
+    Token,
+    UserCreate,
+    UserResponse,
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    require_role
+)
 
-app = FastAPI(title="Orders Service", version="1.2.0")
+app = FastAPI(
+    title="Orders Service",
+    version="2.0.0",
+    description="Microservicio de órdenes con autenticación JWT, RBAC y persistencia PostgreSQL."
+)
 
 # En Docker Compose el hostname es el nombre del servicio.
 # En local se puede sobreescribir: CATALOG_URL=http://localhost:8001
@@ -46,9 +63,7 @@ EVENT_STREAM = os.getenv("EVENT_STREAM", "catalog-events")
 EVENT_GROUP = os.getenv("EVENT_GROUP", "orders-service")
 EVENT_CONSUMER = os.getenv("EVENT_CONSUMER", "orders-1")
 
-# Copia local de la disponibilidad, actualizada por eventos
 SPACE_AVAILABILITY: Dict[int, bool] = {}
-# Bitácora de eventos recibidos (para evidencia del taller)
 EVENT_LOG: List[dict] = []
 
 
@@ -93,10 +108,83 @@ def health():
     return {"status": "healthy", "service": "orders-service"}
 
 
+# ==============================================================================
+# LAB 10: Autenticación JWT + Control de Acceso Basado en Roles (RBAC)
+# ==============================================================================
+
+@app.post("/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
+    """Registra un nuevo usuario en PostgreSQL con contraseña hasheada mediante bcrypt."""
+    existing_user = db.query(UserDB).filter(UserDB.email == user_in.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El correo electrónico ya se encuentra registrado"
+        )
+
+    # Validar rol
+    valid_roles = ["user", "admin", "superadmin"]
+    role = user_in.role if user_in.role in valid_roles else "user"
+
+    hashed_pwd = get_password_hash(user_in.password)
+    new_user = UserDB(
+        email=user_in.email,
+        full_name=user_in.full_name,
+        hashed_password=hashed_pwd,
+        role=role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+@app.post("/auth/login", response_model=Token)
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    """Inicia sesión con credenciales, valida hash y retorna token JWT Bearer (60 minutos)."""
+    user = db.query(UserDB).filter(UserDB.email == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Correo o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(
+        data={"sub": user.email, "role": user.role, "email": user.email}
+    )
+    return Token(access_token=access_token, token_type="bearer")
+
+
+@app.get("/auth/me", response_model=UserResponse)
+def get_user_profile(current_user: UserDB = Depends(get_current_user)):
+    """Retorna los datos del usuario autenticado a través del token JWT."""
+    return current_user
+
+
+@app.get("/admin")
+async def panel_admin(
+    current_user: UserDB = Depends(require_role("admin"))
+):
+    """Ruta protegida para administradores (requiere rol admin o superadmin)."""
+    return {
+        "mensaje": "Acceso autorizado",
+        "user": current_user.email,
+        "role": current_user.role
+    }
+
+
+# ==============================================================================
+# Endpoints de Órdenes (Persistencia PostgreSQL + Notificación Analytics)
+# ==============================================================================
+
 @app.post("/orders", response_model=Order)
 def create_order(
     space_id: int,
-    user_email: str,
+    user_email: str = Query(..., description="Email del usuario que reserva"),
     hours: int = Query(..., gt=0, description="Horas a reservar"),
 ):
     # 1. Consultar catalog-service para validar espacio y precio
@@ -147,7 +235,7 @@ def create_order(
             created_at=new_order.created_at.isoformat()
         )
 
-        # 3. Notificar a analytics-service (arquitectura orders-service -> analytics-svc -> MongoDB Atlas)
+        # 3. Notificar a analytics-service (MongoDB Atlas)
         if ANALYTICS_URL:
             try:
                 httpx.post(

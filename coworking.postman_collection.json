@@ -1,13 +1,14 @@
 {
   "info": {
-    "name": "Coworking Workshop - Taller 3: Bases de Datos en la Nube",
+    "name": "Coworking Workshop - Taller 3 y 4",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Colección completa para pruebas de Taller 3: Catalog Service, Orders Service (PostgreSQL + Alembic) y Analytics Service (MongoDB Atlas)."
+    "description": "Colección completa para pruebas de Taller 3 y 4: Catalog Service, Orders Service (PostgreSQL + Alembic + JWT + RBAC) y Analytics Service (MongoDB Atlas)."
   },
   "variable": [
     { "key": "catalog_url", "value": "http://localhost:8001" },
     { "key": "orders_url", "value": "http://localhost:8002" },
-    { "key": "analytics_url", "value": "http://localhost:8003" }
+    { "key": "analytics_url", "value": "http://localhost:8003" },
+    { "key": "jwt_token", "value": "" }
   ],
   "item": [
     {
@@ -41,6 +42,70 @@
         },
         { "name": "Orders - List orders", "request": { "method": "GET", "url": "{{orders_url}}/orders" } },
         { "name": "Orders - Get order by ID", "request": { "method": "GET", "url": "{{orders_url}}/orders/1" } }
+      ]
+    },
+    {
+      "name": "Auth & RBAC (LAB 10 - JWT + Roles)",
+      "item": [
+        {
+          "name": "Auth - Register User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"usuario@coworking.com\",\n  \"full_name\": \"Usuario Normal\",\n  \"password\": \"MiClaveSegura123*\",\n  \"role\": \"user\"\n}"
+            },
+            "url": "{{orders_url}}/auth/register"
+          }
+        },
+        {
+          "name": "Auth - Register Admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@coworking.com\",\n  \"full_name\": \"Administrador General\",\n  \"password\": \"AdminClaveSegura123*\",\n  \"role\": \"admin\"\n}"
+            },
+            "url": "{{orders_url}}/auth/register"
+          }
+        },
+        {
+          "name": "Auth - Login (Obtain JWT)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "username", "value": "usuario@coworking.com", "type": "text" },
+                { "key": "password", "value": "MiClaveSegura123*", "type": "text" }
+              ]
+            },
+            "url": "{{orders_url}}/auth/login"
+          }
+        },
+        {
+          "name": "Auth - Get Current User (/auth/me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "url": "{{orders_url}}/auth/me"
+          }
+        },
+        {
+          "name": "RBAC - Protected Admin Route (/admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" }
+            ],
+            "url": "{{orders_url}}/admin"
+          }
+        }
       ]
     },
     {
