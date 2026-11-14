@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # DEMOSTRACIÓN LAB 11: RATE LIMITING + CIRCUIT BREAKER + RETRY (CAMILA)
 # ==============================================================================
 
@@ -80,3 +80,4 @@ Write-Host "`nExplicacion: Tras completarse el periodo de recuperacion (recovery
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host " ¡DEMOSTRACION DE LAB 11 COMPLETADA CON EXITO! " -ForegroundColor Green
 Write-Host "=================================================================" -ForegroundColor Cyan
+

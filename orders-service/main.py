@@ -313,25 +313,33 @@ async def create_order(
             created_at=new_order.created_at.isoformat()
         )
 
-        # 3. Notificar a analytics-service (MongoDB Atlas)
+        # 3. Notificar a analytics-service usando Retry with Backoff (LAB 11)
         if ANALYTICS_URL:
+            analytics_payload = {
+                "order_id": new_order.id,
+                "space_id": new_order.space_id,
+                "space_name": new_order.space_name,
+                "user_email": new_order.user_email,
+                "hours": new_order.hours,
+                "price_per_hour": new_order.price_per_hour,
+                "total_price": new_order.total_price,
+                "created_at": new_order.created_at.isoformat()
+            }
+
+            async def _send_analytics_order():
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.post(
+                        f"{ANALYTICS_URL}/orders",
+                        json=analytics_payload
+                    )
+                    if resp.status_code >= 400:
+                        raise Exception(f"Analytics HTTP error {resp.status_code}")
+                    return resp.json()
+
             try:
-                httpx.post(
-                    f"{ANALYTICS_URL}/orders",
-                    json={
-                        "order_id": new_order.id,
-                        "space_id": new_order.space_id,
-                        "space_name": new_order.space_name,
-                        "user_email": new_order.user_email,
-                        "hours": new_order.hours,
-                        "price_per_hour": new_order.price_per_hour,
-                        "total_price": new_order.total_price,
-                        "created_at": new_order.created_at.isoformat()
-                    },
-                    timeout=ANALYTICS_TIMEOUT
-                )
-            except Exception:
-                pass
+                await retry_with_backoff(_send_analytics_order, max_retries=3, base_delay=1.0)
+            except Exception as exc:
+                print(f"[warning] No se pudo enviar orden a analytics tras 3 intentos: {exc}")
 
         return order_data
     except HTTPException:
@@ -416,6 +424,13 @@ def get_resilience_status():
             "can_execute": catalog_circuit.can_execute()
         }
     }
+
+
+@app.get("/catalog/spaces")
+async def proxy_catalog_spaces():
+    """Consulta lista de espacios en catalog-service usando Circuit Breaker."""
+    url = f"{CATALOG_URL}/spaces"
+    return await call_catalog_with_breaker(url, timeout_sec=3.0)
 
 
 @app.get("/catalog/check/{space_id}")

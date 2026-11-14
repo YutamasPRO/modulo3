@@ -195,3 +195,4 @@ print("  [OK] Circuit Breaker restablecido a CLOSED.")
 print("\n" + "=" * 65)
 print("¡TODAS LAS PRUEBAS DE LAB 11 COMPLETADAS CON ÉXITO! (4/4)")
 print("=" * 65)
+
