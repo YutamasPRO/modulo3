@@ -51,8 +51,8 @@ app.middleware("http")(rate_limit_middleware)
 def _is_in_docker() -> bool:
     return os.path.exists("/.dockerenv") or os.getenv("DOCKER_CONTAINER") == "true"
 
-_def_cat_host = "catalog-service" if _is_in_docker() else "localhost"
-_def_ana_host = "analytics-service" if _is_in_docker() else "localhost"
+_def_cat_host = "catalog-service" if _is_in_docker() else "127.0.0.1"
+_def_ana_host = "analytics-service" if _is_in_docker() else "127.0.0.1"
 
 CATALOG_URL = os.getenv("CATALOG_URL", f"http://{_def_cat_host}:8001")
 CATALOG_TIMEOUT = float(os.getenv("CATALOG_TIMEOUT", "3.0"))
@@ -60,6 +60,12 @@ CATALOG_TIMEOUT = float(os.getenv("CATALOG_TIMEOUT", "3.0"))
 # Analytics Service (MongoDB Atlas para métricas y telemetría)
 ANALYTICS_URL = os.getenv("ANALYTICS_URL", f"http://{_def_ana_host}:8003")
 ANALYTICS_TIMEOUT = float(os.getenv("ANALYTICS_TIMEOUT", "2.0"))
+
+
+class OrderCreate(BaseModel):
+    space_id: int = 1
+    hours: int = 2
+    total_price: Optional[float] = None
 
 
 class Order(BaseModel):
@@ -233,6 +239,7 @@ async def panel_admin(
 @app.post("/orders", response_model=Order, status_code=status.HTTP_201_CREATED)
 async def create_order(
     request: Request,
+    order_in: Optional[OrderCreate] = None,
     space_id: Optional[int] = Query(None),
     user_email: Optional[str] = Query(None),
     hours: Optional[int] = Query(None),
@@ -240,7 +247,7 @@ async def create_order(
     db: Session = Depends(get_db)
 ):
     """Crea una orden en PostgreSQL. Requiere autenticación JWT. Extrae el correo del token."""
-    # 1. Leer parámetros desde JSON body o Query params
+    # 1. Leer parámetros desde OrderCreate, JSON body o Query params
     body_data = {}
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
@@ -249,11 +256,24 @@ async def create_order(
         except Exception:
             pass
 
-    target_space_id = body_data.get("space_id") if body_data.get("space_id") is not None else space_id
+    target_space_id = None
+    if order_in and order_in.space_id is not None:
+        target_space_id = order_in.space_id
+    elif body_data.get("space_id") is not None:
+        target_space_id = body_data.get("space_id")
+    elif space_id is not None:
+        target_space_id = space_id
+
     if target_space_id is None:
         raise HTTPException(status_code=400, detail="El campo 'space_id' es requerido")
 
-    target_hours = body_data.get("hours") or hours or 2
+    target_hours = 2
+    if order_in and order_in.hours is not None:
+        target_hours = order_in.hours
+    elif body_data.get("hours") is not None:
+        target_hours = body_data.get("hours")
+    elif hours is not None:
+        target_hours = hours
 
     # El usuario autenticado prevalece para user_email (seguridad JWT)
     target_user_email = current_user.email
@@ -261,7 +281,7 @@ async def create_order(
     # Determinar precio y nombre del espacio
     space_name = f"Espacio #{target_space_id}"
     price_per_hour = 25.0
-    total_price = body_data.get("total_price")
+    total_price = order_in.total_price if order_in and order_in.total_price is not None else body_data.get("total_price")
 
     # Consultar catalog-service con Circuit Breaker + Retry with Backoff (LAB 11)
     catalog_url = f"{CATALOG_URL}/spaces/{target_space_id}"
@@ -328,7 +348,7 @@ async def create_order(
             }
 
             async def _send_analytics_order():
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(timeout=0.8) as client:
                     resp = await client.post(
                         f"{ANALYTICS_URL}/orders",
                         json=analytics_payload
@@ -338,9 +358,9 @@ async def create_order(
                     return resp.json()
 
             try:
-                await retry_with_backoff(_send_analytics_order, max_retries=3, base_delay=1.0)
+                await retry_with_backoff(_send_analytics_order, max_retries=3, base_delay=0.3)
             except Exception as exc:
-                print(f"[warning] No se pudo enviar orden a analytics tras 3 intentos: {exc}")
+                print(f"[warning] No se pudo enviar orden a analytics tras 3 intentos (Backoff aplicado): {exc}")
 
         return order_data
     except HTTPException:

@@ -57,10 +57,11 @@ rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
 
 async def rate_limit_middleware(request: Request, call_next):
     """Middleware de FastAPI para interceptar cada petición y aplicar el Rate Limiter."""
-    # Excluir rutas de documentación, dashboard visual, resiliencia y pruebas de catálogo
+    # Excluir rutas de documentación, dashboard visual, resiliencia, catálogo y autenticación
     if request.url.path in ["/", "/dashboard", "/docs", "/redoc", "/openapi.json"] \
        or request.url.path.startswith("/resilience/") \
-       or request.url.path.startswith("/catalog/"):
+       or request.url.path.startswith("/catalog/") \
+       or request.url.path.startswith("/auth/"):
         return await call_next(request)
 
     # Identificar la dirección IP del cliente (considerando encabezados X-Forwarded-For)

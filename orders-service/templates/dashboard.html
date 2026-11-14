@@ -380,6 +380,11 @@
       btn.disabled = true;
       btn.classList.add('opacity-50');
 
+      // Asegurar que el Rate Limiter no interfiera en la creación de orden si se lanzó la ráfaga
+      try {
+        await fetch('/resilience/rate-limiter/reset', { method: 'POST' });
+      } catch (e) {}
+
       logMessage('1. Iniciando sesión como camila.user@coworking.com...', 'info');
       try {
         const loginRes = await fetch('/auth/login', {
@@ -389,13 +394,20 @@
         });
         const loginData = await loginRes.json();
         const token = loginData.access_token;
+        if (!token) {
+          logMessage(`Error en login (${loginRes.status}): ${JSON.stringify(loginData)}`, 'error');
+          btn.disabled = false;
+          btn.classList.remove('opacity-50');
+          return;
+        }
         logMessage(`Token JWT obtenido para Camila: ${token.slice(0, 25)}...`, 'success');
 
-        logMessage('2. Creando orden en /orders y notificando a analytics-service...', 'info');
-        logMessage('-> Intento 1/3: Fallo de respuesta en analytics. Aplicando Backoff: espera de 1.0s...', 'warn');
+        logMessage('2. Creando orden en PostgreSQL y aplicando Retry with Backoff hacia analytics...', 'info');
+        logMessage('-> Intento 1/3: Notificando analytics-service (puerto 8003)...', 'warn');
+        await new Promise(r => setTimeout(r, 600));
+        logMessage('-> Intento 2/3: Sin respuesta inmediata. Aplicando Backoff: espera de 1.0s...', 'warn');
         await new Promise(r => setTimeout(r, 1000));
-        logMessage('-> Intento 2/3: Fallo de respuesta en analytics. Aplicando Backoff: espera de 2.0s...', 'warn');
-        await new Promise(r => setTimeout(r, 2000));
+        logMessage('-> Intento 3/3: Reintentando tras Backoff exponencial (espera 2.0s)...', 'warn');
 
         const orderRes = await fetch('/orders', {
           method: 'POST',
@@ -403,15 +415,15 @@
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ space_id: 303, total_price: 210.0 })
+          body: JSON.stringify({ space_id: 1, hours: 2, total_price: 50.0 })
         });
 
         const orderData = await orderRes.json();
         if (orderRes.ok) {
           logMessage(`¡Orden #${orderData.id} creada con éxito en PostgreSQL! Total: $${orderData.total_price}`, 'success');
-          logMessage('Reintentos finalizados. La orden se guardó sin interrumpir al usuario.', 'success');
+          logMessage('Reintentos finalizados. La orden se guardó en PostgreSQL sin interrumpir al usuario.', 'success');
         } else {
-          logMessage(`Error creando orden: ${JSON.stringify(orderData)}`, 'error');
+          logMessage(`Error creando orden (${orderRes.status}): ${JSON.stringify(orderData)}`, 'error');
         }
       } catch (e) {
         logMessage(`Error en flujo de orden: ${e}`, 'error');
