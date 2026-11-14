@@ -1,54 +1,34 @@
 ================================================================================
-           COMANDOS DE DEMOSTRACIÓN - TALLER 5 (LAB 11: RESILIENCIA)
-              RATE LIMITING + CIRCUIT BREAKER + RETRY WITH BACKOFF
+             GUÍA PASO A PASO - COMANDOS EXACTOS PARA POWERSHELL
 ================================================================================
 
 --------------------------------------------------------------------------------
-PARTE 1: RATE LIMITING (LÍMITE DE PETICIONES POR IP)
+PASO 1: PROBAR EL RATE LIMITER (105 PETICIONES)
 --------------------------------------------------------------------------------
-
-# Comando a ejecutar en PowerShell:
+# Opción A: Muestra todas las peticiones del 1 al 105 una por una:
 1..105 | ForEach-Object {
     try {
         $res = Invoke-RestMethod -Uri "http://127.0.0.1:8002/health" -Method Get
-        if ($_ % 25 -eq 0) { Write-Host "Solicitud $_ -> OK (200)" -ForegroundColor Green }
+        Write-Host "Solicitud $_ -> OK (200)" -ForegroundColor Green
     } catch {
         Write-Host "Solicitud $_ -> BLOQUEADA con HTTP $($_.Exception.Response.StatusCode.value__) ($($_.ErrorDetails.Message))" -ForegroundColor Red
     }
 }
 
-# Salida esperada en la terminal:
-# Solicitud 25 -> OK (200)
-# Solicitud 50 -> OK (200)
-# Solicitud 75 -> OK (200)
-# Solicitud 100 -> OK (200)
-# Solicitud 101 -> BLOQUEADA con HTTP 429 ({"error":"Too many requests"})
-# Solicitud 102 -> BLOQUEADA con HTTP 429 ({"error":"Too many requests"})
-# Solicitud 103 -> BLOQUEADA con HTTP 429 ({"error":"Too many requests"})
-# Solicitud 104 -> BLOQUEADA con HTTP 429 ({"error":"Too many requests"})
-# Solicitud 105 -> BLOQUEADA con HTTP 429 ({"error":"Too many requests"})
-
-# Lo que le dices al profesor:
-# "Lanzamos 105 peticiones consecutivas desde la misma dirección IP. Las primeras 100
-# solicitudes devuelven código 200 OK. Al llegar a la petición 101, el middleware de 
-# Rate Limiter bloquea el exceso retornando HTTP 429 Too Many Requests con la cabecera
-# Retry-After: 60 para proteger a la API de sobrecargas o ataques de denegación de servicio."
-
 
 --------------------------------------------------------------------------------
-PARTE 2: CIRCUIT BREAKER (CAÍDA DE CATÁLOGO Y APERTURA DEL CIRCUITO)
+PASO 2: VER EL ESTADO INICIAL DEL CIRCUITO (DEBE DECIR "closed")
 --------------------------------------------------------------------------------
+Copia y pega este comando y dale Enter:
 
-# 1. Ver estado inicial del Circuit Breaker (CLOSED):
 Invoke-RestMethod -Uri "http://127.0.0.1:8002/resilience/status" | ConvertTo-Json
 
-# 2. Detener temporalmente catalog-service para simular caída:
-# (Si usas Docker):
-docker stop catalog-service
-# (Si lo corres local en Windows):
-Stop-Process -Id (Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue).OwningProcess -Force -ErrorAction SilentlyContinue
 
-# 3. Provocar los 5 fallos consecutivos para abrir el circuito:
+--------------------------------------------------------------------------------
+PASO 3: PROVOCAR LOS 5 FALLOS PARA ABRIR EL CIRCUITO
+--------------------------------------------------------------------------------
+Copia y pega este bloque y dale Enter:
+
 1..6 | ForEach-Object {
     try {
         Invoke-RestMethod -Uri "http://127.0.0.1:8002/catalog/spaces" -Method Get
@@ -57,64 +37,33 @@ Stop-Process -Id (Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyCont
     }
 }
 
-# Salida esperada de los 6 intentos:
-# Intento 1 -> HTTP 503: {"detail":"Catalog service call failed: All connection attempts failed"}
-# Intento 2 -> HTTP 503: {"detail":"Catalog service call failed: All connection attempts failed"}
-# Intento 3 -> HTTP 503: {"detail":"Catalog service call failed: All connection attempts failed"}
-# Intento 4 -> HTTP 503: {"detail":"Catalog service call failed: All connection attempts failed"}
-# Intento 5 -> HTTP 503: {"detail":"Catalog service call failed: All connection attempts failed"}
-# Intento 6 -> HTTP 503: {"detail":"Catalog service circuit breaker is OPEN (service temporarily unavailable)"}
 
-# 4. Comprobar que el circuito pasó a estado OPEN y failure_count = 5:
+--------------------------------------------------------------------------------
+PASO 4: COMPROBAR QUE EL CIRCUITO SE ABRIÓ (DEBE DECIR "open" Y failure_count = 5)
+--------------------------------------------------------------------------------
+Copia y pega este comando y dale Enter:
+
 Invoke-RestMethod -Uri "http://127.0.0.1:8002/resilience/status" | ConvertTo-Json
 
-# 5. Volver a encender catalog-service / restablecer circuito:
-# (Si usas Docker):
-docker start catalog-service
-# (Si lo corres local en Windows):
+
+--------------------------------------------------------------------------------
+PASO 5: RESTABLECER EL CIRCUITO A NORMAL ("closed")
+--------------------------------------------------------------------------------
+Copia y pega este comando y dale Enter:
+
 Invoke-RestMethod -Uri "http://127.0.0.1:8002/resilience/circuit-breaker/reset" -Method Post | Out-Null
-
-# Lo que le dices al profesor:
-# "Al detectar 5 fallos consecutivos hacia el servicio externo de catálogo, el Circuit
-# Breaker cambia de estado CLOSED a OPEN. A partir del sexto intento, el circuito bloquea
-# inmediatamente las llamadas y devuelve HTTP 503 Service Unavailable sin esperar tiempos
-# de respuesta ni saturar la red. Tras el tiempo de recuperación, vuelve a cerrarse."
+Write-Host "Circuito restablecido con exito a CLOSED" -ForegroundColor Green
 
 
 --------------------------------------------------------------------------------
-PARTE 3: RETRY WITH BACKOFF (REINTENTOS EXPONENCIALES CON ANALYTICS)
+PASO 6: PROBAR LOS REINTENTOS (RETRY WITH BACKOFF) CREANDO UNA ORDEN
 --------------------------------------------------------------------------------
+Copia y pega este bloque y dale Enter:
 
-# 1. Apagar analytics-service para forzar el reintento:
-# (Si usas Docker):
-docker stop analytics-service
-# (Si lo corres local en Windows):
-Stop-Process -Id (Get-NetTCPConnection -LocalPort 8003 -ErrorAction SilentlyContinue).OwningProcess -Force -ErrorAction SilentlyContinue
-
-# 2. Iniciar sesión y crear una orden:
 $userLogin = @{ username = "camila.user@coworking.com"; password = "UserPass2026!" }
 $jwt = (Invoke-RestMethod -Uri "http://127.0.0.1:8002/auth/login" -Method Post -Body $userLogin).access_token
 $headers = @{ Authorization = "Bearer $jwt" }
 $orderBody = @{ space_id = 303; total_price = 210.0 } | ConvertTo-Json
 
 Invoke-RestMethod -Uri "http://127.0.0.1:8002/orders" -Method Post -Body $orderBody -Headers $headers -ContentType "application/json"
-
-# 3. Ver los logs donde se imprimieron los reintentos:
-# (Si usas Docker):
-docker logs orders-service --tail 10
-# (En la consola de orders-service local se observa):
-# Retry 1/3 after 1.0s: All connection attempts failed
-# Retry 2/3 after 2.0s: All connection attempts failed
-# [warning] No se pudo enviar orden a analytics tras 3 intentos
-
-# 4. Volver a encender analytics-service:
-# (Si usas Docker):
-docker start analytics-service
-
-# Lo que le dices al profesor:
-# "Al estar caído analytics-service, la función retry_with_backoff realiza reintentos
-# automáticos espaciando los tiempos de espera progresivamente: 1 segundo en el primer
-# intento y 2 segundos en el segundo (retroceso exponencial). Como es un servicio de
-# métricas secundario, la orden se guarda correctamente en PostgreSQL sin perjudicar
-# la experiencia del usuario."
 ================================================================================
