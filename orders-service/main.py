@@ -13,6 +13,7 @@ import httpx
 import redis
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Depends, status, Request
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -469,6 +470,21 @@ def reset_rate_limiter():
     """Limpia los registros del Rate Limiter."""
     rate_limiter.reset()
     return {"message": "Rate Limiter limpiado"}
+
+
+# ==============================================================================
+# Dashboard Visual Interactivo (LAB 11)
+# ==============================================================================
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
+def serve_dashboard():
+    """Sirve la interfaz web interactiva para demostración visual de resiliencia."""
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Dashboard template not found</h1>", status_code=404)
 
 
 if __name__ == "__main__":

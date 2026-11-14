@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Resiliencia & Seguridad | Coworking API (LAB 11)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+
+  <!-- Top Navbar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
+          ⚡
+        </div>
+        <div>
+          <h1 class="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            Coworking Space API
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-medium">LAB 11: Resiliencia</span>
+          </h1>
+          <p class="text-xs text-slate-400">Rate Limiting • Circuit Breaker • Retry with Backoff • JWT Auth</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-3">
+        <span id="service-status-pill" class="flex items-center text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>
+          orders-service: 8002
+        </span>
+        <a href="/docs" target="_blank" class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1.5 font-medium">
+          <span>Swagger UI</span>
+          <span>↗</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- Grid of 3 Mechanism Cards -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Card 1: Rate Limiter -->
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-blue-400">Mecanismo 1</span>
+            <span id="rate-badge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">
+              Permitido (200 OK)
+            </span>
+          </div>
+          <h2 class="text-lg font-bold text-white mb-1">Rate Limiter</h2>
+          <p class="text-xs text-slate-400 mb-4">Límite de 100 peticiones por IP cada 60s. Petición 101+ bloqueada con HTTP 429.</p>
+
+          <!-- Counter and Progress Bar -->
+          <div class="space-y-2 mb-4 bg-slate-950 p-3.5 rounded-lg border border-slate-800/80">
+            <div class="flex justify-between text-xs">
+              <span class="text-slate-400">Solicitudes consumidas:</span>
+              <span id="rate-counter" class="font-bold text-white font-mono text-sm">0 / 100</span>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden p-0.5">
+              <div id="rate-progress" class="bg-blue-500 h-2 rounded-full transition-all duration-150" style="width: 0%"></div>
+            </div>
+            <div class="flex justify-between text-[11px] text-slate-500">
+              <span>0 req</span>
+              <span>100 req (Límite)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-2 pt-2">
+          <button id="btn-burst" onclick="runRateLimitBurst()" class="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-medium text-xs shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2">
+            <span>🚀</span>
+            <span>Lanzar Ráfaga (105 Peticiones)</span>
+          </button>
+          <button onclick="resetRateLimiter()" class="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition flex items-center justify-center gap-1.5">
+            <span>🔄</span>
+            <span>Reiniciar Contador</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 2: Circuit Breaker -->
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-purple-400">Mecanismo 2</span>
+            <span class="text-xs text-slate-500 font-mono">catalog-service:8001</span>
+          </div>
+          <h2 class="text-lg font-bold text-white mb-1">Circuit Breaker</h2>
+          <p class="text-xs text-slate-400 mb-4">Abre al 5° fallo consecutivo. Bloquea llamadas con HTTP 503 sin esperar timeouts.</p>
+
+          <!-- State Badge Display -->
+          <div class="bg-slate-950 p-4 rounded-lg border border-slate-800/80 text-center mb-4">
+            <span class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Estado del Circuito</span>
+            <div id="circuit-badge" class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-base font-extrabold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span id="circuit-state-text">CLOSED</span>
+            </div>
+            <div class="mt-3 flex justify-around text-xs border-t border-slate-800/80 pt-2.5 text-slate-400">
+              <div>Fallos: <span id="cb-failures" class="text-white font-bold font-mono">0 / 5</span></div>
+              <div>Recuperación: <span class="text-white font-bold font-mono">60s</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-2 pt-2">
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="testCatalogSpaces()" class="py-2.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs border border-slate-700 transition flex items-center justify-center gap-1.5">
+              <span>🔍</span>
+              <span>Probar Catálogo</span>
+            </button>
+            <button onclick="tripCircuitBreaker()" class="py-2.5 px-3 rounded-lg bg-rose-600/90 hover:bg-rose-500 text-white font-medium text-xs shadow-lg shadow-rose-600/20 transition flex items-center justify-center gap-1.5">
+              <span>💥</span>
+              <span>Forzar OPEN (5 Fallos)</span>
+            </button>
+          </div>
+          <button onclick="resetCircuitBreaker()" class="w-full py-2 px-3 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-medium text-xs border border-emerald-500/30 transition flex items-center justify-center gap-1.5">
+            <span>🛡️</span>
+            <span>Restablecer a CLOSED</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 3: Retry with Backoff & Orders -->
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-amber-400">Mecanismo 3</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-medium">Camila Auth</span>
+          </div>
+          <h2 class="text-lg font-bold text-white mb-1">Retry with Backoff</h2>
+          <p class="text-xs text-slate-400 mb-4">Reintentos automáticos progresivos (1s, 2s) al notificar analytics-service.</p>
+
+          <!-- Backoff Visual Ladder -->
+          <div class="bg-slate-950 p-3.5 rounded-lg border border-slate-800/80 space-y-2 text-xs mb-4">
+            <div class="flex items-center justify-between text-slate-300">
+              <span class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center font-bold text-[10px]">1</span>
+                <span>Primer Intento</span>
+              </span>
+              <span class="text-amber-400 font-mono">Espera 1.0s</span>
+            </div>
+            <div class="flex items-center justify-between text-slate-300">
+              <span class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center font-bold text-[10px]">2</span>
+                <span>Segundo Intento</span>
+              </span>
+              <span class="text-amber-400 font-mono">Espera 2.0s</span>
+            </div>
+            <div class="flex items-center justify-between text-slate-300">
+              <span class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center font-bold text-[10px]">3</span>
+                <span>Tercer Intento</span>
+              </span>
+              <span class="text-emerald-400 font-mono">Final / Éxito</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="space-y-2 pt-2">
+          <button id="btn-order" onclick="createOrderWithRetry()" class="w-full py-2.5 px-4 rounded-lg bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-medium text-xs shadow-lg shadow-amber-600/30 transition flex items-center justify-center gap-2">
+            <span>🛒</span>
+            <span>Crear Orden (Simular Reintentos)</span>
+          </button>
+          <div class="text-[11px] text-center text-slate-400">
+            Usuario: <span class="text-slate-200 font-mono">camila.user@coworking.com</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Live Terminal / Console Window -->
+    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-2xl">
+      <div class="bg-slate-950 px-4 py-2.5 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="w-3 h-3 rounded-full bg-rose-500/80"></div>
+          <div class="w-3 h-3 rounded-full bg-amber-500/80"></div>
+          <div class="w-3 h-3 rounded-full bg-emerald-500/80"></div>
+          <span class="text-xs font-mono text-slate-400 ml-2 font-medium">Terminal de Eventos en Vivo & Respuestas HTTP</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="clearConsole()" class="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition font-mono">
+            Limpiar
+          </button>
+        </div>
+      </div>
+      <div id="terminal-logs" class="p-4 font-mono text-xs text-slate-300 h-64 overflow-y-auto space-y-1.5 bg-black/50">
+        <div class="text-slate-500 italic">[Sistema inicializado. Listo para ejecutar pruebas de resiliencia...]</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    function logMessage(msg, type = 'info') {
+      const logs = document.getElementById('terminal-logs');
+      const time = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'flex items-start gap-2';
+
+      let color = 'text-slate-300';
+      let icon = 'ℹ️';
+      if (type === 'success') { color = 'text-emerald-400'; icon = '✅'; }
+      if (type === 'warn')    { color = 'text-amber-400';   icon = '⚠️'; }
+      if (type === 'error')   { color = 'text-rose-400';    icon = '❌'; }
+      if (type === 'burst')   { color = 'text-blue-400';    icon = '⚡'; }
+
+      div.innerHTML = `<span class="text-slate-600">[${time}]</span> <span class="${color}">${icon} ${msg}</span>`;
+      logs.appendChild(div);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    function clearConsole() {
+      document.getElementById('terminal-logs').innerHTML = '';
+      logMessage('Consola limpiada.', 'info');
+    }
+
+    async function updateStatus() {
+      try {
+        const res = await fetch('/resilience/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update Rate Limiter UI
+        const count = data.rate_limiter.tracked_ips_count > 0 ? (data.rate_limiter.current_usage || 0) : 0;
+        
+        // Update Circuit Breaker UI
+        const state = data.circuit_breaker.state.toUpperCase();
+        const failures = data.circuit_breaker.failure_count;
+        document.getElementById('circuit-state-text').innerText = state;
+        document.getElementById('cb-failures').innerText = `${failures} / 5`;
+
+        const badge = document.getElementById('circuit-badge');
+        if (state === 'CLOSED') {
+          badge.className = 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-base font-extrabold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40';
+          badge.querySelector('span').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+        } else if (state === 'OPEN') {
+          badge.className = 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-base font-extrabold uppercase bg-rose-500/20 text-rose-400 border border-rose-500/40';
+          badge.querySelector('span').className = 'w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse';
+        } else {
+          badge.className = 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-base font-extrabold uppercase bg-amber-500/20 text-amber-400 border border-amber-500/40';
+          badge.querySelector('span').className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+        }
+      } catch (err) {}
+    }
+
+    // Polling cada 3 segundos
+    setInterval(updateStatus, 3000);
+    updateStatus();
+
+    // 1. RATE LIMITER BURST (105 Peticiones)
+    async function runRateLimitBurst() {
+      const btn = document.getElementById('btn-burst');
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
+
+      logMessage('Iniciando ráfaga de 105 peticiones hacia /health...', 'burst');
+      let blockedCount = 0;
+      let okCount = 0;
+
+      for (let i = 1; i <= 105; i++) {
+        try {
+          const res = await fetch('/health');
+          const pct = Math.min(100, Math.round((i / 100) * 100));
+          document.getElementById('rate-progress').style.width = `${pct}%`;
+          document.getElementById('rate-counter').innerText = `${Math.min(100, i)} / 100`;
+
+          if (res.status === 200) {
+            okCount++;
+            if (i % 25 === 0) {
+              logMessage(`Solicitud ${i}/105 -> 200 OK`, 'success');
+            }
+          } else if (res.status === 429) {
+            blockedCount++;
+            document.getElementById('rate-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 font-semibold';
+            document.getElementById('rate-badge').innerText = 'Bloqueado (429)';
+            document.getElementById('rate-progress').classList.remove('bg-blue-500');
+            document.getElementById('rate-progress').classList.add('bg-rose-500');
+            logMessage(`Solicitud ${i}/105 -> BLOQUEADA con HTTP 429 Too Many Requests (Retry-After: 60)`, 'error');
+          }
+        } catch (e) {
+          logMessage(`Error en solicitud ${i}: ${e}`, 'error');
+        }
+      }
+
+      logMessage(`Ráfaga finalizada: ${okCount} permitidas, ${blockedCount} bloqueadas.`, blockedCount > 0 ? 'warn' : 'success');
+      btn.disabled = false;
+      btn.classList.remove('opacity-50');
+    }
+
+    async function resetRateLimiter() {
+      await fetch('/resilience/rate-limiter/reset', { method: 'POST' });
+      document.getElementById('rate-progress').style.width = '0%';
+      document.getElementById('rate-progress').classList.remove('bg-rose-500');
+      document.getElementById('rate-progress').classList.add('bg-blue-500');
+      document.getElementById('rate-counter').innerText = '0 / 100';
+      document.getElementById('rate-badge').className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold';
+      document.getElementById('rate-badge').innerText = 'Permitido (200 OK)';
+      logMessage('Contador de Rate Limiter restablecido a cero.', 'success');
+    }
+
+    // 2. CIRCUIT BREAKER
+    async function testCatalogSpaces() {
+      logMessage('Consultando /catalog/spaces a través del Circuit Breaker...', 'info');
+      try {
+        const res = await fetch('/catalog/spaces');
+        const data = await res.json();
+        if (res.ok) {
+          logMessage(`Catálogo respondió 200 OK: ${JSON.stringify(data).slice(0, 60)}...`, 'success');
+        } else {
+          logMessage(`Catálogo falló con HTTP ${res.status}: ${JSON.stringify(data)}`, 'error');
+        }
+      } catch (e) {
+        logMessage(`Error llamando catálogo: ${e}`, 'error');
+      }
+      updateStatus();
+    }
+
+    async function tripCircuitBreaker() {
+      logMessage('Forzando apertura del Circuit Breaker (simulando 5 fallos consecutivos)...', 'warn');
+      const res = await fetch('/resilience/circuit-breaker/trip', { method: 'POST' });
+      const data = await res.json();
+      logMessage(`Circuit Breaker forzado a: ${data.state.toUpperCase()}`, 'error');
+      updateStatus();
+    }
+
+    async function resetCircuitBreaker() {
+      const res = await fetch('/resilience/circuit-breaker/reset', { method: 'POST' });
+      const data = await res.json();
+      logMessage('Circuit Breaker restablecido a estado CLOSED.', 'success');
+      updateStatus();
+    }
+
+    // 3. RETRY WITH BACKOFF & ORDERS
+    async function createOrderWithRetry() {
+      const btn = document.getElementById('btn-order');
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
+
+      logMessage('1. Iniciando sesión como camila.user@coworking.com...', 'info');
+      try {
+        const loginRes = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'camila.user@coworking.com', password: 'UserPass2026!' })
+        });
+        const loginData = await loginRes.json();
+        const token = loginData.access_token;
+        logMessage(`Token JWT obtenido para Camila: ${token.slice(0, 25)}...`, 'success');
+
+        logMessage('2. Creando orden en /orders (aplicando Retry with Backoff hacia analytics)...', 'info');
+        const orderRes = await fetch('/orders', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ space_id: 303, total_price: 210.0 })
+        });
+
+        const orderData = await orderRes.json();
+        if (orderRes.ok) {
+          logMessage(`¡Orden #${orderData.id} creada con éxito en PostgreSQL! Total: $${orderData.total_price}`, 'success');
+          logMessage(`(Si analytics estaba caído, se ejecutaron 3 reintentos con esperas de 1s y 2s)`, 'warn');
+        } else {
+          logMessage(`Error creando orden: ${JSON.stringify(orderData)}`, 'error');
+        }
+      } catch (e) {
+        logMessage(`Error en flujo de orden: ${e}`, 'error');
+      }
+
+      btn.disabled = false;
+      btn.classList.remove('opacity-50');
+    }
+  </script>
+</body>
+</html>
