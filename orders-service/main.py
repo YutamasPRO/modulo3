@@ -29,12 +29,22 @@ from auth import (
     get_current_user,
     require_role
 )
+from middleware import (
+    rate_limiter,
+    rate_limit_middleware,
+    catalog_circuit,
+    call_catalog_with_breaker,
+    retry_with_backoff
+)
 
 app = FastAPI(
     title="Orders Service",
-    version="2.0.0",
-    description="Microservicio de órdenes con autenticación JWT, RBAC y persistencia PostgreSQL."
+    version="2.1.0",
+    description="Microservicio de órdenes con autenticación JWT, RBAC, Rate Limiting y Circuit Breaker (LAB 10 & 11)."
 )
+
+# Registrar Middleware de Rate Limiting (LAB 11)
+app.middleware("http")(rate_limit_middleware)
 
 # Detección inteligente de entorno Docker vs Local
 def _is_in_docker() -> bool:
@@ -252,22 +262,26 @@ async def create_order(
     price_per_hour = 25.0
     total_price = body_data.get("total_price")
 
-    # Intentar consultar catalog-service si está disponible
+    # Consultar catalog-service con Circuit Breaker + Retry with Backoff (LAB 11)
+    catalog_url = f"{CATALOG_URL}/spaces/{target_space_id}"
     try:
-        response = httpx.get(
-            f"{CATALOG_URL}/spaces/{target_space_id}",
-            timeout=CATALOG_TIMEOUT
-        )
-        if response.status_code == 200:
-            space = response.json()
+        async def _fetch_space():
+            return await call_catalog_with_breaker(catalog_url, timeout_sec=CATALOG_TIMEOUT)
+
+        space = await retry_with_backoff(_fetch_space, max_retries=3, base_delay=0.5)
+        if isinstance(space, dict) and "name" in space:
             space_name = space.get("name", space_name)
             price_per_hour = space.get("price_per_hour", price_per_hour)
             if not space.get("available", True):
                 raise HTTPException(status_code=409, detail="Space is not available")
-    except HTTPException:
-        raise
+    except HTTPException as he:
+        if he.status_code == 409:
+            raise he
+        # Si el Circuit Breaker está OPEN (503) y no hay precio forzado, propagar error 503
+        if he.status_code == 503 and total_price is None and target_space_id < 100:
+            raise he
     except Exception:
-        # Modo resiliente
+        # Modo resiliente para espacios simulados
         pass
 
     if total_price is None:
@@ -378,6 +392,68 @@ def get_order(order_id: int):
         raise HTTPException(status_code=500, detail="Error retrieving order")
     finally:
         db.close()
+
+
+# ==============================================================================
+# LAB 11: Endpoints de Monitoreo y Pruebas de Resiliencia
+# ==============================================================================
+
+@app.get("/resilience/status")
+def get_resilience_status():
+    """Consulta el estado en vivo del Circuit Breaker y del Rate Limiter."""
+    return {
+        "rate_limiter": {
+            "max_requests": rate_limiter.max_requests,
+            "window_seconds": rate_limiter.window_seconds,
+            "tracked_ips_count": len(rate_limiter.requests)
+        },
+        "circuit_breaker": {
+            "service": "catalog-service",
+            "state": catalog_circuit.state,
+            "failure_count": catalog_circuit.failure_count,
+            "failure_threshold": catalog_circuit.failure_threshold,
+            "recovery_timeout_seconds": catalog_circuit.recovery_timeout,
+            "can_execute": catalog_circuit.can_execute()
+        }
+    }
+
+
+@app.get("/catalog/check/{space_id}")
+async def check_catalog_space(space_id: int):
+    """Consulta un espacio en catalog-service usando Circuit Breaker + Retry with Backoff."""
+    url = f"{CATALOG_URL}/spaces/{space_id}"
+
+    async def _fetch():
+        return await call_catalog_with_breaker(url, timeout_sec=5.0)
+
+    try:
+        data = await retry_with_backoff(_fetch, max_retries=3, base_delay=1.0)
+        return {"status": "ok", "data": data, "circuit_state": catalog_circuit.state}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Fallo tras reintentos o circuito abierto: {exc}")
+
+
+@app.post("/resilience/circuit-breaker/trip")
+def trip_circuit_breaker():
+    """Fuerza la apertura del Circuit Breaker para demostraciones rápidas."""
+    catalog_circuit.state = catalog_circuit.STATE_OPEN
+    catalog_circuit.failure_count = catalog_circuit.failure_threshold
+    catalog_circuit.last_failure_time = time.time()
+    return {"message": "Circuit Breaker forzado a estado OPEN", "state": catalog_circuit.state}
+
+
+@app.post("/resilience/circuit-breaker/reset")
+def reset_circuit_breaker():
+    """Restablece el Circuit Breaker al estado CLOSED."""
+    catalog_circuit.reset()
+    return {"message": "Circuit Breaker restablecido a estado CLOSED", "state": catalog_circuit.state}
+
+
+@app.post("/resilience/rate-limiter/reset")
+def reset_rate_limiter():
+    """Limpia los registros del Rate Limiter."""
+    rate_limiter.reset()
+    return {"message": "Rate Limiter limpiado"}
 
 
 if __name__ == "__main__":

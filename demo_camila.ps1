@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # DEMOSTRACIÓN TALLER 4: AUTENTICACIÓN JWT + RBAC (CAMILA)
 # ==============================================================================
 
@@ -59,3 +59,4 @@ Write-Host "`nExplicacion: Inicio sesion con el admin y si me deja entrar (200 O
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host " ¡DEMOSTRACION COMPLETADA CON EXITO! " -ForegroundColor Green
 Write-Host "=================================================================" -ForegroundColor Cyan
+
